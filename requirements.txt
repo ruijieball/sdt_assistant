@@ -1,0 +1,10 @@
+openai
+pillow
+fastapi>=0.114.0,<0.115.0 # Pin: Starlette 0.41+ breaks TemplateResponse(name, dict) signature
+uvicorn
+gunicorn
+python-multipart
+chromadb
+aiofiles
+sentence_transformers
+jinja2>=3.1.4

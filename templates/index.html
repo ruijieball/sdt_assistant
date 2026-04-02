@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>沙雕图小助理</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <header class="header">
+            <h1>🖼️ 沙雕图小助理</h1>
+            <p>上传沙雕图，然后再快速查到沙雕图</p>
+        </header>
+
+        <!-- 导航标签 -->
+        <nav class="nav-tabs">
+            <button class="tab-btn active" data-tab="add">
+                <span class="icon">📤</span>
+                <span>添加图片</span>
+            </button>
+            <button class="tab-btn" data-tab="search">
+                <span class="icon">🔍</span>
+                <span>搜索</span>
+            </button>
+            <button class="tab-btn" data-tab="second-chance">
+                <span class="icon">🔄</span>
+                <span>二次优化</span>
+            </button>
+        </nav>
+
+        <!-- 内容区域 -->
+        <main class="content">
+            <!-- 添加图片模块 -->
+            <section id="add-tab" class="tab-content active">
+                <div class="upload-area" id="upload-area">
+                    <div class="upload-placeholder">
+                        <span class="upload-icon">📁</span>
+                        <p>点击或拖拽图片到此处上传</p>
+                        <p class="upload-hint">支持 PNG、JPG、WebP 等格式，最多 5 张图片</p>
+                    </div>
+                    <input type="file" id="file-input" multiple accept="image/*" hidden>
+                </div>
+                
+                <div class="preview-area" id="preview-area"></div>
+                
+                <button class="submit-btn" id="upload-btn" disabled>
+                    <span class="btn-text">开始识别并添加</span>
+                    <span class="loading-spinner hidden"></span>
+                </button>
+                
+                <div class="result-area" id="add-result"></div>
+            </section>
+
+            <!-- 搜索模块 -->
+            <section id="search-tab" class="tab-content">
+                <div class="search-box">
+                    <input type="text" id="search-input" placeholder="输入关键词搜索沙雕图..." class="search-input">
+                    <button class="search-btn" id="search-btn">
+                        <span class="icon">🔍</span>
+                        <span class="btn-text">搜索</span>
+                    <span class="loading-spinner hidden"></span>
+                </button>
+            </div>
+
+                <div class="search-stats" id="search-stats"></div>
+                
+                <div class="search-results" id="search-results"></div>
+            </section>
+
+            <!-- 二次优化模块 -->
+            <section id="second-chance-tab" class="tab-content">
+                <div class="form-group">
+                    <label for="sc-id-input">图片 ID</label>
+                    <input type="text" id="sc-id-input" placeholder="输入要优化的图片 ID">
+    </div>
+
+                <div class="form-group">
+                    <label for="sc-prompt-input">优化提示词</label>
+                    <textarea id="sc-prompt-input" rows="4" placeholder="描述你希望 AI 如何重新理解这张图片，例如：&#10;- 请更详细地描述表情包中的梗&#10;- 重点关注图片中的文字内容&#10;- 识别一下这个表情包的使用场景"></textarea>
+                </div>
+                
+                <button class="submit-btn" id="sc-btn">
+                    <span class="btn-text">重新识别并保存</span>
+                    <span class="loading-spinner hidden"></span>
+                </button>
+                
+                <div class="result-area" id="sc-result"></div>
+            </section>
+        </main>
+
+        <!-- 图片预览模态框 -->
+        <div class="modal" id="image-modal">
+            <span class="modal-close">&times;</span>
+            <div class="modal-content">
+                <img id="modal-image" src="" alt="预览">
+                <div class="modal-info" id="modal-info"></div>
+            </div>
+        </div>
+
+        <!-- 提示消息 -->
+        <div class="toast" id="toast"></div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
+
