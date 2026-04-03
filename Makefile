@@ -47,6 +47,8 @@ run:
 		-e LLM_API_KEY=$(LLM_API_KEY) \
 		-e LLM_MODEL=$(LLM_MODEL) \
 		-v $(PROJECT_ROOT)/data:/sdt_assistant/data \
+		-v /etc/localtime:/etc/localtime:ro \
+		-v /etc/timezone:/etc/timezone:ro \
 		--restart unless-stopped \
 		$(IMAGE_NAME):$(VERSION)
 
@@ -56,6 +58,8 @@ run-dev:
 	docker run --rm -it \
 		-p 8283:8283 \
 		-v $(PROJECT_ROOT)/data:/sdt_assistant/data \
+		-v /etc/localtime:/etc/localtime:ro \
+		-v /etc/timezone:/etc/timezone:ro \
 		$(IMAGE_NAME):$(VERSION) \
 		uvicorn main:app --host 0.0.0.0 --port ${PORT}
 
@@ -77,6 +81,8 @@ run-shell:
 	docker run --rm -it \
 		-p 8283:8283 \
 		-v $(PROJECT_ROOT)/data:/sdt_assistant/data \
+		-v /etc/localtime:/etc/localtime:ro \
+		-v /etc/timezone:/etc/timezone:ro \
 		$(IMAGE_NAME):$(VERSION) \
 		/bin/bash
 

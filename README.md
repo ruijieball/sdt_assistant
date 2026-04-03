@@ -112,6 +112,12 @@ python main.py
 - 项目为自用，来自vibe coding，欢迎 Fork 二次开发
 - 适合部署在 NAS 上，数据完全本地存储
 
+## 界面截图
+
+![screenshot01](screenshot/screenshot01.jpg)
+
+![screenshot02](screenshot/screenshot02.jpg)
+
 ## 📄 许可证
 
 MIT License

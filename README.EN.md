@@ -112,6 +112,14 @@ Main endpoints:
 - Personal project, built with vibe coding. Feel free to fork and customize!
 - Perfect for NAS deployment with fully local data storage
 
+## Screenshot
+
+## 界面截图
+
+![screenshot01](screenshot/screenshot01.jpg)
+
+![screenshot02](screenshot/screenshot02.jpg)
+
 ## 📄 License
 
 MIT License
