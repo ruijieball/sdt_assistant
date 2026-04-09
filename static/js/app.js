@@ -6,7 +6,11 @@ const state = {
     selectedFiles: [],
     searchResults: [],
     searchDocuments: {},
-    searchMetadatas: {}
+    searchMetadatas: {},
+    dedupResults: {}, 
+    dedupGroups: [],
+    dedupIdInfo: {},
+    deletedIds: new Set()  
 };
 
 // DOM 元素
@@ -41,7 +45,13 @@ const elements = {
     modalClose: document.querySelector('.modal-close'),
     
     // Toast
-    toast: document.getElementById('toast')
+    toast: document.getElementById('toast'),
+
+    // 查重模块
+    checkDupBtn: document.getElementById('check-dedup-btn'),
+    dedupStats: document.getElementById('dedup-stats'),
+    dedupResults: document.getElementById('dedup-results')
+
 };
 
 // 初始化
@@ -85,6 +95,10 @@ function bindEvents() {
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') closeModal();
     });
+
+    // 查重
+    elements.checkDupBtn.addEventListener('click', handleCheckDuplication);
+
 }
 
 // 切换标签页
@@ -365,7 +379,6 @@ function openSecondChance(id) {
 }
 
 // 显示图片详情
-// 显示图片详情
 function showImageDetail(id, specificFileName = null) {
     // 从保存的搜索结果中获取 document 和 metadata
     const doc = state.searchDocuments[id];
@@ -561,6 +574,478 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// 查重主函数
+async function handleCheckDuplication() {
+    setLoading(elements.checkDupBtn, true);
+    elements.dedupResults.innerHTML = '<div class="empty-state">查重中，请稍候...</div>';
+    elements.dedupStats.textContent = '';
+    
+    // 重置状态
+    state.dedupResults = {};
+    state.dedupGroups = [];
+    state.dedupIdInfo = {};
+    state.deletedIds.clear();
+    
+    try {
+        // 1. 调用查重接口
+        const response = await fetch('/check-duplication');
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.detail || '查重失败');
+        }
+        
+        state.dedupResults = data.result;
+        
+        // 2. 解析并分组（按 id 分组）
+        state.dedupGroups = groupDedupById(state.dedupResults);
+        
+        // 3. 获取每个 id 的详细信息
+        await fetchIdInfo(state.dedupGroups);
+        
+        // 4. 渲染结果
+        renderDedupResults();
+        
+        showToast('查重完成！', 'success');
+    } catch (error) {
+        elements.dedupResults.innerHTML = `<div class="empty-state error">查重失败：${error.message}</div>`;
+        showToast(error.message, 'error');
+    } finally {
+        setLoading(elements.checkDupBtn, false);
+    }
+}
+
+// 按 id 分组查重结果
+function groupDedupById(rawResults) {
+    const groups = new Map(); // id -> { id, images: [{path, fileName, related: []}] }
+    
+    // 第一步：收集所有出现过的图片路径
+    const allPaths = new Set();
+    
+    for (const [sourcePath, duplicates] of Object.entries(rawResults)) {
+        allPaths.add(sourcePath);
+        for (const [dupPath, score] of duplicates) {
+            allPaths.add(dupPath);
+        }
+    }
+    
+    // 第二步：为每个路径建立图片对象
+    const imageMap = new Map(); // path -> { path, fileName, id, related: [] }
+    
+    for (const path of allPaths) {
+        const fileName = path.split('/')[1];
+        const id = extractIdFromPath(path);
+        
+        imageMap.set(path, {
+            path,
+            fileName,
+            id,
+            related: []
+        });
+    }
+    
+    // 第三步：填充重复关系
+    for (const [sourcePath, duplicates] of Object.entries(rawResults)) {
+        const sourceImage = imageMap.get(sourcePath);
+        
+        for (const [dupPath, score] of duplicates) {
+            const dupImage = imageMap.get(dupPath);
+            
+            // 添加双向关系
+            if (sourceImage && dupImage) {
+                sourceImage.related.push({
+                    path: dupPath,
+                    fileName: dupImage.fileName,
+                    id: dupImage.id,
+                    score
+                });
+            }
+        }
+    }
+    
+    // 第四步：按 id 分组
+    for (const [path, image] of imageMap.entries()) {
+        const id = image.id;
+        
+        if (!groups.has(id)) {
+            groups.set(id, {
+                id,
+                images: []
+            });
+        }
+        
+        groups.get(id).images.push(image);
+    }
+    
+    return Array.from(groups.values());
+}
+
+// 从路径提取 id (e.g., "id1/image.jpg" -> "id1")
+function extractIdFromPath(path) {
+    return path.split('/')[0];
+}
+
+// 获取所有 id 的详细信息
+async function fetchIdInfo(groups) {
+    const idSet = new Set(groups.map(g => g.id));
+    const promises = [];
+    
+    for (const id of idSet) {
+        if (!state.dedupIdInfo[id]) {
+            promises.push((async () => {
+                try {
+                    const response = await fetch(`/query-id?id=${encodeURIComponent(id)}`);
+                    const data = await response.json();
+                    state.dedupIdInfo[id] = data;
+                } catch (error) {
+                    console.error(`获取 id ${id} 信息失败:`, error);
+                    state.dedupIdInfo[id] = null;
+                }
+            })());
+        }
+    }
+    
+    await Promise.all(promises);
+}
+
+// 渲染查重结果
+function renderDedupResults() {
+    if (state.dedupGroups.length === 0) {
+        elements.dedupStats.textContent = '未发现重复图片';
+        elements.dedupResults.innerHTML = '<div class="empty-state">🎉 没有发现重复的图片！</div>';
+        return;
+    }
+    
+    // 过滤掉已删除的组（可选，看需求是否要显示）
+    const activeGroups = state.dedupGroups.filter(g => !state.deletedIds.has(g.id));
+    
+    elements.dedupStats.textContent = `发现 ${activeGroups.length} 组重复图片，共涉及 ${state.dedupGroups.length} 个素材`;
+    
+    elements.dedupResults.innerHTML = '';
+    
+    activeGroups.forEach(group => {
+        const groupEl = createDedupGroupElement(group);
+        elements.dedupResults.appendChild(groupEl);
+    });
+}
+
+// 创建分组卡片元素
+function createDedupGroupElement(group) {
+    const card = document.createElement('div');
+    card.className = `dedup-group ${state.deletedIds.has(group.id) ? 'deleted' : ''}`;
+    card.dataset.groupId = group.id;
+    
+    const idInfo = state.dedupIdInfo[group.id];
+    const creationTime = idInfo ? formatTimestamp(idInfo.metadata?.['creation time']) : '未知';
+    const modificationTime = idInfo ? formatTimestamp(idInfo.metadata?.['modification time']) : '未知';
+    const docContent = idInfo ? idInfo.document : '';  // ✅ 修改变量名：document -> docContent
+    
+    // 构建图片列表 HTML
+    let imagesHtml = '';
+    
+    group.images.forEach((image, index) => {
+        const imageUrl = `/uploads/${image.path}`;
+        const isDeleted = state.deletedIds.has(image.id);
+        const hasRelated = image.related.length > 0;
+        
+        imagesHtml += `
+            <div class="dedup-image-item ${isDeleted ? 'deleted' : ''}" data-image-path="${image.path}">
+                <div class="dedup-main-image">
+                    <div class="dedup-image-wrapper" onclick="showDedupImageDetail('${group.id}', '${image.fileName}')">
+                        <img src="${imageUrl}" alt="${image.fileName}" loading="lazy" 
+                             onload="updateImageResolution(this, '${image.path}')">
+                    </div>
+                    <div class="dedup-image-meta">
+                        <div class="dedup-image-name">${image.fileName}</div>
+                        <div class="dedup-image-resolution" data-path="${image.path}">-</div>
+                        ${!hasRelated ? '<div class="dedup-no-dup">✅ 无重复图片</div>' : ''}
+                    </div>
+                </div>
+                
+                ${hasRelated ? `
+                    <div class="dedup-related-list">
+                        <div class="dedup-related-title">🔗 重复图片：</div>
+                        ${image.related.map(rel => {
+                            const relImageUrl = `/uploads/${rel.path}`;
+                            const relIsDeleted = state.deletedIds.has(rel.id);
+                            const scoreClass = getScoreClass(rel.score);
+                            return `
+                                <div class="dedup-related-item ${relIsDeleted ? 'deleted' : ''}" 
+                                     data-related-path="${rel.path}" data-related-id="${rel.id}">
+                                    <div class="dedup-related-image-wrapper" 
+                                         onclick="showDedupImageDetail('${rel.id}', '${rel.fileName}')">
+                                        <img src="${relImageUrl}" alt="${rel.fileName}" loading="lazy">
+                                    </div>
+                                    <div class="dedup-related-info">
+                                        <div class="dedup-related-name">${rel.fileName}</div>
+                                        <div class="dedup-related-id">ID: ${rel.id}</div>
+                                        <div class="dedup-related-actions">
+                                            <span class="dedup-image-score ${scoreClass}">score: ${rel.score}</span>
+                                            <button class="btn-jump" onclick="jumpToGroup('${rel.id}', event)">
+                                                跳转至 ID
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                ` : ''}
+                
+                ${index < group.images.length - 1 ? '<div class="dedup-image-divider"></div>' : ''}
+            </div>
+        `;
+    });
+    
+    card.innerHTML = `
+        <div class="dedup-group-header">
+            <div class="dedup-group-info">
+                <div class="dedup-group-id">📁 ID: ${group.id}</div>
+                <div class="dedup-group-times">创建：${creationTime} | 修改：${modificationTime}</div>
+            </div>
+            <div class="dedup-group-actions">
+                <button class="btn-view-doc" onclick="showDocumentModal('${group.id}', event)">
+                    📄 查看文档
+                </button>
+                <button class="btn-delete" onclick="deleteDedupGroup('${group.id}', event)" 
+                        ${state.deletedIds.has(group.id) ? 'disabled' : ''}>
+                    ${state.deletedIds.has(group.id) ? '已删除' : '删除'}
+                </button>
+            </div>
+        </div>
+        <div class="dedup-images-list">
+            ${imagesHtml}
+        </div>
+    `;
+    
+    // 存储 document 信息到卡片数据
+    card.dataset.document = docContent || '';
+    
+    return card;
+}
+
+
+// 显示文档模态框
+function showDocumentModal(id, event) {
+    event.stopPropagation();
+    
+    const idInfo = state.dedupIdInfo[id];
+    const docContent = idInfo ? idInfo.document : '';
+    
+    elements.modalInfo.innerHTML = `
+        <h3>📄 索引文档 - ${id}</h3>
+        <div class="document-content">
+            <pre>${escapeHtml(docContent || '无文档内容')}</pre>
+        </div>
+        <div class="modal-actions">
+            <button class="btn-optimize" onclick="closeModal(); openSecondChance('${id}')">🔄 二次优化</button>
+        </div>
+    `;
+    
+    elements.modalImage.style.display = 'none';
+    elements.modal.classList.add('show');
+    document.body.style.overflow = 'hidden';
+}
+
+
+// 查重页面显示图片详情
+function showDedupImageDetail(id, specificFileName = null) {
+    const idInfo = state.dedupIdInfo[id];
+    
+    if (!idInfo) {
+        showToast('未找到图片信息，请重新查重', 'error');
+        return;
+    }
+    
+    const metadata = idInfo.metadata || {};
+    const docContent = idInfo.document;
+    
+    // 从 metadata 中获取 file_names
+    let files = metadata.file_names || [];
+    
+    // 如果 metadata 中没有，尝试从 document 解析（兜底）
+    if (files.length === 0 && docContent) {
+        const fileMatches = docContent.match(/file_names:\s*\n((?:\s*-\s*[^\n]+\n?)+)/);
+        files = fileMatches ? fileMatches[1].match(/-\s*([^\n]+)/g).map(m => m.replace('- ', '').trim()) : [];
+    }
+    
+    // 确定要显示的图片
+    let displayFile = specificFileName;
+    if (!displayFile && files.length > 0) {
+        displayFile = files[0];
+    }
+    
+    // 设置模态框图片
+    if (displayFile) {
+        elements.modalImage.src = `/uploads/${id}/${displayFile}`;
+        elements.modalImage.style.display = '';
+    } else {
+        elements.modalImage.src = '';
+        elements.modalImage.style.display = 'none';
+    }
+    
+    // 构建文件列表 HTML（如果有多张图片）
+    let filesHtml = '';
+    if (files.length > 1) {
+        filesHtml = '<div class="modal-files-list"><h4>文件夹中的所有文件：</h4><div class="files-grid">';
+        files.forEach(file => {
+            const isActive = file === displayFile ? 'active' : '';
+            filesHtml += `
+                <div class="file-thumb ${isActive}" onclick="switchModalImage('${id}', '${file}')">
+                    <img src="/uploads/${id}/${file}" loading="lazy" alt="${file}">
+                    <span>${file}</span>
+                </div>
+            `;
+        });
+        filesHtml += '</div></div>';
+    }
+    
+    // 格式化时间戳
+    const creationTime = formatTimestamp(metadata['creation time']);
+    const modificationTime = formatTimestamp(metadata['modification time']);
+    
+    elements.modalInfo.innerHTML = `
+        <h3>图片信息</h3>
+        <p><strong>ID:</strong> ${id}</p>
+        <p><strong>创建时间:</strong> ${creationTime}</p>
+        <p><strong>修改时间:</strong> ${modificationTime}</p>
+        ${files.length > 1 ? `<p><strong>当前文件:</strong> ${displayFile || '无'}</p>` : ''}
+        ${filesHtml}
+        <div class="document-content"><pre>${escapeHtml(docContent || '无描述信息')}</pre></div>
+        <div class="modal-actions">
+            <button class="btn-view-doc" onclick="showDocumentModal('${id}', event)">📄 查看文档</button>
+            <button class="btn-optimize" onclick="closeModal(); openSecondChance('${id}')">🔄 二次优化</button>
+        </div>
+    `;
+    
+    elements.modal.classList.add('show');
+    document.body.style.overflow = 'hidden';
+}
+
+
+// 跳转至指定 ID 分组
+function jumpToGroup(targetId, event) {
+    event.stopPropagation();
+    
+    const targetGroup = document.querySelector(`.dedup-group[data-group-id="${targetId}"]`);
+    if (targetGroup) {
+        targetGroup.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        targetGroup.style.transition = 'box-shadow 0.3s';
+        targetGroup.style.boxShadow = '0 0 0 3px #4f46e5';
+        setTimeout(() => {
+            targetGroup.style.boxShadow = '';
+        }, 2000);
+    } else {
+        showToast(`ID "${targetId}" 的分组不存在或已删除`, 'warning');
+    }
+}
+
+
+// 获取相似度评分的样式类
+function getScoreClass(score) {
+    if (score <= 5) return 'high';
+    if (score <= 10) return 'medium';
+    return 'low';
+}
+
+// 更新图片分辨率显示
+async function updateImageResolution(imgElement, imagePath) {
+    try {
+        // 创建 Image 对象获取分辨率
+        const img = new Image();
+        img.src = imgElement.src;
+        await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+        });
+        
+        const resolutionEl = document.querySelector(`.dedup-image-resolution[data-path="${imagePath}"]`);
+        if (resolutionEl) {
+            resolutionEl.textContent = `${img.width} × ${img.height} px`;
+        }
+    } catch (error) {
+        const resolutionEl = document.querySelector(`.dedup-image-resolution[data-path="${imagePath}"]`);
+        if (resolutionEl) {
+            resolutionEl.textContent = '获取失败';
+        }
+    }
+}
+
+// 删除分组
+async function deleteDedupGroup(id, event) {
+    if (!confirm(`确定要删除素材 "${id}" 吗？此操作不可恢复！`)) {
+        return;
+    }
+    
+    const btn = event.target;
+    const originalText = btn.textContent;
+    btn.textContent = '删除中...';
+    btn.disabled = true;
+    
+    try {
+        const response = await fetch(`/delete?id=${encodeURIComponent(id)}`);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.detail || '删除失败');
+        }
+        
+        // 标记为已删除
+        state.deletedIds.add(id);
+        
+        // 更新 UI 状态
+        updateDeletedState(id);
+        
+        showToast(`素材 "${id}" 已删除`, 'success');
+    } catch (error) {
+        showToast(error.message, 'error');
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
+}
+
+// 更新已删除状态的显示
+function updateDeletedState(deletedId) {
+    // 1. 更新该分组的显示
+    const deletedGroup = document.querySelector(`.dedup-group[data-group-id="${deletedId}"]`);
+    if (deletedGroup) {
+        deletedGroup.classList.add('deleted');
+        const deleteBtn = deletedGroup.querySelector('.btn-delete');
+        if (deleteBtn) {
+            deleteBtn.textContent = '已删除';
+            deleteBtn.disabled = true;
+        }
+    }
+    
+    // 2. 更新所有引用该 id 的相关图片
+    document.querySelectorAll(`.dedup-related-item[data-related-id="${deletedId}"]`).forEach(item => {
+        item.classList.add('deleted');
+    });
+    
+    // 3. 更新所有属于该 id 的主图片
+    document.querySelectorAll(`.dedup-image-item[data-image-path^="${deletedId}/"]`).forEach(item => {
+        item.classList.add('deleted');
+    });
+    
+    // 4. 更新统计信息
+    const activeGroups = state.dedupGroups.filter(g => !state.deletedIds.has(g.id));
+    elements.dedupStats.textContent = `发现 ${activeGroups.length} 组重复图片（已删除 ${state.deletedIds.size} 个素材）`;
+}
+
+// 格式化时间戳
+function formatTimestamp(timestamp) {
+    if (!timestamp) return '未知';
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
 }
 
 // 启动应用

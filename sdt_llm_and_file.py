@@ -6,6 +6,7 @@ from openai.types.chat import ChatCompletionMessageParam
 from openai import APIConnectionError, APITimeoutError, AuthenticationError,  APIStatusError
 from PIL import Image
 from config import LLM_API_URL, LLM_API_KEY, LLM_MODEL, LLM_SYSTEM_MESSAGE, IMG_MAX_BYTES_BASE64, IMG_MAX_HEIGHT, IMG_MAX_WIDTH, LLM_TIMEOUT, ACCEPTED_MIME_TYPE, UPLOAD_FOLDER
+from sdt_check_duplication import encode_dedup_image, add_dedup_entry
 import base64
 import io
 import os
@@ -323,8 +324,13 @@ async def llm_create_yaml_and_save(user_files) -> dict:
         file_extension = detect_image_type(content).split('/')[1]
         file_name = str(uuid.uuid7().hex) + '.' + file_extension
         file_name_list.append(file_name)
-        async with aiofiles.open(os.path.join(UPLOAD_FOLDER, folder_name, file_name), "wb") as f:
+        full_file_path = os.path.join(UPLOAD_FOLDER, folder_name, file_name)
+
+        async with aiofiles.open(full_file_path, "wb") as f:
             await f.write(content)
+
+        await add_dedup_entry(folder_name + '/' + file_name, await encode_dedup_image(full_file_path))
+
         logger.info(f"存储素材：{folder_name}/{file_name}")
 
     llm_result :str = await ask_llm(llm_messages)

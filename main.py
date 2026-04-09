@@ -5,8 +5,20 @@
 """
 
 
-import asyncio
+
+from config import APP_TITLE, APP_DESCRIPTION, APP_VERSION, MAX_FILE_QUANTITY, IMG_MAX_BYTES, ACCEPTED_MIME_TYPE, LLM_TIMEOUT, LOG_FILE, MAX_BODY_SIZE,  UPLOAD_FOLDER
 import logging
+logging.basicConfig(
+    level = logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        # 1. 输出到控制台 (默认是 sys.stderr，也可以指定 sys.stdout)
+        logging.StreamHandler(), 
+        # 2. 输出到本地文件
+        logging.FileHandler(LOG_FILE, encoding='utf-8')
+    ]
+)
+import asyncio
 from fastapi import FastAPI, UploadFile, HTTPException, Depends, Request, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
@@ -14,12 +26,13 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from typing import Annotated
 import uvicorn
-from config import APP_TITLE, APP_DESCRIPTION, APP_VERSION, MAX_FILE_QUANTITY, IMG_MAX_BYTES, ACCEPTED_MIME_TYPE, LLM_TIMEOUT, LOG_FILE, MAX_BODY_SIZE,  UPLOAD_FOLDER
 from sdt_llm_and_file import llm_create_yaml_and_save, llm_create_yaml_without_save, get_uploads_list, delete_id_folder, read_yaml
 import sdt_chroma
+import sdt_check_duplication
 import time
 import os
 
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title = APP_TITLE,
@@ -34,19 +47,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 setattr(Request, "max_body_size", MAX_BODY_SIZE)
-
-logging.basicConfig(
-    level = logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        # 1. 输出到控制台 (默认是 sys.stderr，也可以指定 sys.stdout)
-        logging.StreamHandler(), 
-        # 2. 输出到本地文件
-        logging.FileHandler(LOG_FILE, encoding='utf-8')
-    ]
-)
-
-logger = logging.getLogger(__name__)
 
 
 class UpdateParameters(BaseModel):
@@ -71,6 +71,12 @@ class SecondChanceParameters(BaseModel):
     text: str = Field(
         description = "传给大语言模型的修改提示词",
         )
+    
+
+class EncodeDedupParameters(BaseModel):
+    missing_dedup_images: list[str] = Field(
+        description = "需要编码的图片列表，通常是prune接口返回的missing_dedup_images，若无此参数则编码系统内所有图片"
+        )
 
 
 class UpdateResponse(BaseModel):
@@ -80,6 +86,12 @@ class UpdateResponse(BaseModel):
 
 class CommonResponse(BaseModel):
     result: str | list | dict = Field(description="操作结果")
+    process_time: float = Field(description="处理耗时（秒）")
+
+
+class PruneResponse(BaseModel):
+    result: str | list | dict = Field(description="操作结果")
+    missing_dedup_images: list[str | None] = Field(description="missing_dedup_images列表，可用于encode_deduplication接口的参数")
     process_time: float = Field(description="处理耗时（秒）")
 
 
@@ -98,7 +110,9 @@ class SearchResponse(BaseModel):
 
 
 class QueryResponse(BaseModel):
-    result: str = Field(description="查询结果详情")
+    id: str = Field(description="查询的id")
+    document: str = Field(description="id对应的文档内容")
+    metadata: dict = Field(description="id对应的元数据")
     process_time: float = Field(description="处理耗时（秒）")
 
 
@@ -254,8 +268,9 @@ async def second_chance(para: SecondChanceParameters):
 
 
 
-@app.get("/prune", summary = "清理未关联的素材和向量数据库", tags = ["System"], response_model = CommonResponse)
+@app.get("/prune", summary = "清理未关联的素材和向量数据库", tags = ["System"], response_model = PruneResponse)
 async def prune():
+    # 若prune同时有add请求，可能会导致删除添加中的素材，以后可以考虑加锁
     start_time = time.time()
 
     logger.info("收到/prune请求")
@@ -276,13 +291,23 @@ async def prune():
     for id in orphan_folders:
         await delete_id_folder(id)
 
-    result = f"清理orphan_documents共{len(orphan_documents)}个,清理orphan_folders共{len(orphan_folders)}个。系统共有条目{len(vaild_ids)}个。"
+    dedup_images = await sdt_check_duplication.get_dedup_list()
+    vaild_image_path: list[str] = []
+    for id in vaild_ids:
+        vaild_image_path.extend([id + '/' + item for item in os.listdir(os.path.join(UPLOAD_FOLDER, id))])
+    orphan_dedup_images = set(dedup_images) - set(vaild_image_path)
+    await sdt_check_duplication.delete_dedup_entries(list(orphan_dedup_images))
+
+    missing_dedup_images = list(set(vaild_image_path) - set(dedup_images))
+
+    result = f"清理orphan_documents共{len(orphan_documents)}个,orphan_folders共{len(orphan_folders)}个,orphan_dedup_images共{len(orphan_dedup_images)}个;missing_dedup_images共{len(missing_dedup_images)}个。系统共有条目{len(vaild_ids)}个。"
 
     end_time = time.time()
     process_time = end_time - start_time
-    logger.warning(f"/prune请求处理完成, 清理orphan_documents共{len(orphan_documents)}个,清理orphan_folders共{len(orphan_folders)}个。系统共有条目{len(vaild_ids)}个。process_time={process_time}")
+    logger.warning(f"/prune请求处理完成。{result}process_time={process_time}")
     return {
         "result": result,
+        "missing_dedup_images": missing_dedup_images,
         "process_time": process_time
         }
 
@@ -294,6 +319,11 @@ async def delete_id(id: str = Query(description = "需要删除的id")):
     logger.info(f"收到请求/delete?id={id}")
 
     sdt_chroma.delete_documents(id)
+
+    if os.path.isdir(os.path.join(UPLOAD_FOLDER, id)):
+        to_delete = [id + '/' + item for item in os.listdir(os.path.join(UPLOAD_FOLDER, id))]
+        await sdt_check_duplication.delete_dedup_entries(to_delete)
+        
     await delete_id_folder(id)
 
     end_time = time.time()
@@ -342,18 +372,20 @@ def update_document(para: UpdateParameters):
         }
 
 
-@app.get("/query-id", summary = "通过id返回素材document", tags = ["Search"], response_model = QueryResponse)
+@app.get("/query-id", summary = "通过id返回素材详情", tags = ["Search"], response_model = QueryResponse)
 def query_id(id: str = Query(description = "需要查询的id")):
     start_time = time.time()
     logger.info(f"收到请求/query-id?id={id}")
 
-    result :str = sdt_chroma.query_document_by_id(id)
+    result :dict = sdt_chroma.query_all_by_id(id)
 
     end_time = time.time()
     process_time = end_time - start_time
     logger.info(f"/query-id请求处理完成, process_time={process_time}")
     return {
-        "result": result,
+        "id": result.get("id", ""),
+        "document": result.get("document", ""),
+        "metadata": result.get("metadata", {}),
         "process_time": process_time
         }
 
@@ -362,12 +394,44 @@ def query_id(id: str = Query(description = "需要查询的id")):
 async def check_duplication():
     start_time = time.time()
     logger.info(f"收到请求/check-duplication")
-
+    result :dict = await sdt_check_duplication.find_duplicate_images()
     end_time = time.time()
     process_time = end_time - start_time
     logger.info(f"/check-duplication请求处理完成, process_time={process_time}")
     return {
-        "result": "待开发",
+        "result": result,
+        "process_time": process_time
+        }
+
+
+@app.post("/encode-dedup", summary = "编码缺失的图片dedup信息用于加速图片去重", tags = ["System"], response_model = CommonResponse)
+async def encode_dedup(para: EncodeDedupParameters):
+    start_time = time.time()
+    logger.info(f"收到请求/encode-dedup")
+    missing_dedup_images = para.missing_dedup_images
+    seccess_dedup_count = 0
+    fail_dedup_count = 0
+    if missing_dedup_images == []:
+        await sdt_check_duplication.encode_all_dedup_images()
+        result = "已编码系统内所有图片的dedup信息"
+    else:
+        for image in missing_dedup_images:
+            file_path = os.path.join(UPLOAD_FOLDER, image)
+            if os.path.isfile(file_path):
+                image_hash = await sdt_check_duplication.encode_dedup_image(file_path)
+                await sdt_check_duplication.add_dedup_entry(image, image_hash)
+                seccess_dedup_count += 1
+            else:
+                fail_dedup_count += 1
+                logger.info(f"/encode-dedup请求中，图片{image}不存在")
+        result = f"已编码{seccess_dedup_count}张图片的dedup信息，{fail_dedup_count}张图片编码失败（通常是因为图片不存在）"
+
+
+    end_time = time.time()
+    process_time = end_time - start_time
+    logger.info(f"/encode-dedup请求处理完成, {result}, process_time={process_time}")
+    return {
+        "result": result,
         "process_time": process_time
         }
 

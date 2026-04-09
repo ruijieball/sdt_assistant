@@ -15,6 +15,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+logger.info(f"初始化 EmbeddingFunction，使用模型: {EMBEDDING_MODEL}")
 custom_ef = embedding_functions.SentenceTransformerEmbeddingFunction( # type: ignore
     model_name = EMBEDDING_MODEL
 )
@@ -22,7 +23,7 @@ os.makedirs(DB_FOLDER, exist_ok=True)
 client = chromadb.PersistentClient(path = DB_FOLDER)
 # 使用 type: ignore 来绕过类型检查问题（这是 chromadb 库的已知类型问题）
 collection_text = client.get_or_create_collection(name = DB_NAME, embedding_function = custom_ef) # type: ignore
-collection_img = client.get_or_create_collection(name = "image_test")
+# collection_img = client.get_or_create_collection(name = "image_test")
 
 def upsert_documents(id :str, document :str, metadata):
 

@@ -31,6 +31,7 @@
 | 前端交互 | 原生 JavaScript + CSS |
 | 向量数据库 | ChromaDB |
 | 大模型 | OpenAI 兼容接口 / 本地模型 API |
+| 图片查重 | imagededup库 |
 | 微信插件 | 通过 [sdt_bridge](https://github.com/ruijieball/sdt_bridge) 与微信 OpenClaw 插件集成 |
 
 ## 🚀 快速开始

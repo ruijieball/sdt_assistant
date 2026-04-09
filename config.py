@@ -12,6 +12,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(BASE_DIR, 'data', 'run.log')
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'data', 'uploads')
 DB_FOLDER = os.path.join(BASE_DIR, 'data', 'chroma_db')
+DEDUP_FILE = os.path.join(BASE_DIR, 'data', 'dedup.pkl')
+
+# 汉明距离阈值，数值越小越严格，通常10以下被认为是相似图片
+MAX_DISTANCE_THRESHOLD = int(os.getenv('MAX_DISTANCE_THRESHOLD', "15"))
 
 # 素材上传限制
 MAX_FILE_QUANTITY = 5
@@ -47,7 +51,7 @@ CUSTOM_LLM = {
     "OLLAMA": {
         "CUSTOM_API_URL": 'http://localhost:11434/v1/',
         "CUSTOM_API_KEY": 'ollama',
-        "CUSTOM_MODEL": 'qwen3.5:9b'
+        "CUSTOM_MODEL": 'gemma4:e2b'
 
     },
         "OPENAI": {

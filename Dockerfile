@@ -5,9 +5,10 @@ WORKDIR /sdt_assistant
 
 # 安装系统依赖 (如果需要编译某些 python 包，如 psycopg2, pillow 等)
 # 如果不需要编译型依赖，可以跳过 RUN apt-get 步骤以减小镜像体积
-# RUN apt-get update && apt-get install -y --no-install-recommends \
-#     gcc \
-#     && rm -rf /var/lib/apt/lists/*
+RUN sed -i 's@deb.debian.org@mirrors.aliyun.com@g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件并安装 Python 依赖
 # 单独复制 requirements.txt 可以利用 Docker 缓存层，
@@ -37,7 +38,7 @@ HEALTHCHECK --interval=300s --timeout=5s --start-period=30s --retries=3 \
 
 CMD ["gunicorn", "main:app",  \
   "--bind", "0.0.0.0:8283",  \
-  "--workers", "4", \
+  "--workers", "1", \
   "--worker-class", "uvicorn.workers.UvicornWorker", \
   "--timeout", "600", \
   "--access-logfile", "-", \

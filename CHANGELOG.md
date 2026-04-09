@@ -1,3 +1,12 @@
+## 0.1.2 (2026.4.9)
+
+### New Features
+
+**Image Deduplication**
+- Detect and clean up duplicate/similar images to save storage space
+
+---
+
 ## 0.1.1 (2026.4.3)
 
 ### Improvements

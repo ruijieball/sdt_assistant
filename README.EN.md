@@ -31,6 +31,7 @@ Compared to traditional image-based search, semantic understanding helps you fin
 | Frontend | Vanilla JavaScript + CSS |
 | Vector Database | ChromaDB |
 | LLM | OpenAI Compatible API / Local Ollama |
+| Image Deduplication | imagededup |
 | WeChat Plugin | [sdt_bridge](https://github.com/ruijieball/sdt_bridge) |
 
 ## 🚀 Quick Start

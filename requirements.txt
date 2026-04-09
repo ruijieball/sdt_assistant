@@ -8,3 +8,4 @@ chromadb
 aiofiles
 sentence_transformers
 jinja2>=3.1.4
+imagededup
