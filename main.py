@@ -116,6 +116,12 @@ class QueryResponse(BaseModel):
     process_time: float = Field(description="处理耗时（秒）")
 
 
+class GetIdListResponse(BaseModel):
+    id_list: list[str] = Field(description="查询的id列表，按创建时间排序，新的在前")
+    item_count: int = Field(description="id总数量")
+    process_time: float = Field(description="处理耗时（秒）")
+
+
 async def validate_add_params(
     # user_content: Annotated[str, Form()] | None = None,
     user_files: list[UploadFile] | None = None
@@ -266,6 +272,31 @@ async def second_chance(para: SecondChanceParameters):
             "process_time": process_time
             }
 
+
+@app.get("/get-id-list", summary = "获取id列表", tags = ["Search"], response_model = GetIdListResponse)
+async def get_id_list(page: int = Query(default =1, ge = 1, description = "查询页码"), size: int = Query( default =20, ge = 10, le = 50, description = "每页数量")):
+    start_time = time.time()
+    logger.info("收到/get-id-list请求")
+
+    id_list:list = list(sdt_chroma.get_id_list())
+
+    item_count = len(id_list)
+
+    # 按照uuid7排序，即创建时间排序，最新的在前面，旧的在后面
+    id_list.sort(reverse = True)
+    # 分页处理
+    start = (page - 1) * size
+    end = start + size
+    id_list = id_list[start:end]
+
+    end_time = time.time()
+    process_time = end_time - start_time
+    logger.info(f"/get-id-list请求处理完成")
+
+    return {"id_list": id_list,
+            "item_count": item_count,
+            "process_time": process_time
+            }
 
 
 @app.get("/prune", summary = "清理未关联的素材和向量数据库", tags = ["System"], response_model = PruneResponse)

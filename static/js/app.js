@@ -10,7 +10,11 @@ const state = {
     dedupResults: {}, 
     dedupGroups: [],
     dedupIdInfo: {},
-    deletedIds: new Set()  
+    deletedIds: new Set(),
+    idListPage: 1,
+    idListPageSize: 20,
+    idListTotal: 0,
+    idListCache: {}  // id -> {document, metadata} 缓存
 };
 
 // DOM 元素
@@ -50,7 +54,17 @@ const elements = {
     // 查重模块
     checkDupBtn: document.getElementById('check-dedup-btn'),
     dedupStats: document.getElementById('dedup-stats'),
-    dedupResults: document.getElementById('dedup-results')
+    dedupResults: document.getElementById('dedup-results'),
+
+    // 素材管理模块
+    loadIdListBtn: document.getElementById('load-id-list-btn'),
+    prevPageBtn: document.getElementById('prev-page-btn'),
+    nextPageBtn: document.getElementById('next-page-btn'),
+    currentPageInput: document.getElementById('current-page-input'),
+    totalPages: document.getElementById('total-pages'),
+    manageStats: document.getElementById('manage-stats'),
+    idListResults: document.getElementById('id-list-results')
+
 
 };
 
@@ -98,6 +112,15 @@ function bindEvents() {
 
     // 查重
     elements.checkDupBtn.addEventListener('click', handleCheckDuplication);
+
+    // 素材管理
+    elements.loadIdListBtn.addEventListener('click', handleIdListLoad);
+    elements.prevPageBtn.addEventListener('click', () => handlePageChange(-1));
+    elements.nextPageBtn.addEventListener('click', () => handlePageChange(1));
+    elements.currentPageInput.addEventListener('change', handlePageInput);
+    elements.currentPageInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') handlePageInput();
+    });
 
 }
 
@@ -380,9 +403,21 @@ function openSecondChance(id) {
 
 // 显示图片详情
 function showImageDetail(id, specificFileName = null) {
-    // 从保存的搜索结果中获取 document 和 metadata
-    const doc = state.searchDocuments[id];
-    const metadata = state.searchMetadatas[id] || {};
+    // 1. 先从搜索结果中获取（搜索模块）
+    let doc = state.searchDocuments[id];
+    let metadata = state.searchMetadatas[id] || {};
+    
+    // 2. 如果搜索结果中没有，从图片管理缓存中获取（图片管理模块）
+    if (!doc && state.idListCache[id]) {
+        doc = state.idListCache[id].document;
+        metadata = state.idListCache[id].metadata || {};
+    }
+    
+    // 3. 如果还是没有，从查重信息中获取（查重模块）
+    if (!doc && state.dedupIdInfo[id]) {
+        doc = state.dedupIdInfo[id].document;
+        metadata = state.dedupIdInfo[id].metadata || {};
+    }
     
     if (!doc && !metadata.file_names) {
         showToast('未找到图片信息，请重新搜索', 'error');
@@ -431,7 +466,7 @@ function showImageDetail(id, specificFileName = null) {
     // 格式化时间戳
     function formatTimestamp(timestamp) {
         if (!timestamp) return '未知';
-        const date = new Date(timestamp * 1000); // 时间戳是秒，需要乘1000
+        const date = new Date(timestamp * 1000);
         return date.toLocaleString('zh-CN', {
             year: 'numeric',
             month: '2-digit',
@@ -454,6 +489,7 @@ function showImageDetail(id, specificFileName = null) {
         ${filesHtml}
         <div class="document-content"><pre>${escapeHtml(doc || '无描述信息')}</pre></div>
         <div class="modal-actions">
+            <button class="btn-view-doc" onclick="showDocumentModal('${id}', event)">📄 查看文档</button>
             <button class="btn-optimize" onclick="closeModal(); openSecondChance('${id}')">🔄 二次优化</button>
         </div>
     `;
@@ -462,7 +498,7 @@ function showImageDetail(id, specificFileName = null) {
     document.body.style.overflow = 'hidden';
 }
 
-// 新增：切换模态框中的图片
+// 切换模态框中的图片
 function switchModalImage(id, fileName) {
     elements.modalImage.src = `/uploads/${id}/${fileName}`;
     // 更新 active 状态
@@ -537,13 +573,19 @@ function setLoading(button, loading) {
     
     if (loading) {
         button.disabled = true;
-        if (spinner) spinner.classList.remove('hidden');  // 添加空值检查
+        if (spinner) spinner.classList.remove('hidden');
         if (text) text.textContent = '处理中...';
     } else {
         button.disabled = false;
-        if (spinner) spinner.classList.add('hidden');  // 添加空值检查
-        if (text) text.textContent = button.id === 'upload-btn' ? '开始识别并添加' : 
-                                  button.id === 'sc-btn' ? '重新识别并保存' : '搜索';
+        if (spinner) spinner.classList.add('hidden');
+        // 根据按钮 ID 恢复对应的文字
+        if (text) {
+            text.textContent = button.id === 'upload-btn' ? '开始识别并添加' : 
+                               button.id === 'sc-btn' ? '重新识别并保存' : 
+                               button.id === 'search-btn' ? '搜索' : 
+                               button.id === 'load-id-list-btn' ? '刷新列表' : 
+                               button.id === 'check-dedup-btn' ? '开始查重' : '搜索';
+        }
     }
 }
 
@@ -1047,6 +1089,275 @@ function formatTimestamp(timestamp) {
         second: '2-digit'
     });
 }
+
+
+// 加载 ID 列表
+async function handleIdListLoad() {
+    setLoading(elements.loadIdListBtn, true);
+    elements.idListResults.innerHTML = '<div class="empty-state">加载中...</div>';
+    elements.manageStats.textContent = '';
+    
+    try {
+        // 1. 获取 ID 列表
+        const response = await fetch(`/get-id-list?page=${state.idListPage}&size=${state.idListPageSize}`);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.detail || '获取列表失败');
+        }
+        
+        state.idListTotal = data.item_count;
+        const idList = data.id_list;
+        
+        // 2. 批量获取每个 ID 的详情
+        elements.idListResults.innerHTML = `<div class="empty-state">获取到 ${idList.length} 个 ID，正在加载详情...</div>`;
+        
+        const promises = idList.map(async (id) => {
+            // 先从缓存获取
+            if (state.idListCache[id]) {
+                return { id, ...state.idListCache[id] };
+            }
+            // 否则调用 API
+            try {
+                const res = await fetch(`/query-id?id=${encodeURIComponent(id)}`);
+                const result = await res.json();
+                // 缓存结果
+                state.idListCache[id] = { document: result.document, metadata: result.metadata };
+                return { id, document: result.document, metadata: result.metadata };
+            } catch (error) {
+                console.error(`获取 ID ${id} 详情失败:`, error);
+                return { id, document: '', metadata: {} };
+            }
+        });
+        
+        const results = await Promise.all(promises);
+        
+        // 3. 渲染结果
+        renderIdList(results, data.item_count);
+        
+        // 4. 更新分页控件
+        updatePageControls(data.item_count);
+        
+        showToast('列表加载完成！', 'success');
+    } catch (error) {
+        elements.idListResults.innerHTML = `<div class="empty-state error">加载失败：${error.message}</div>`;
+        showToast(error.message, 'error');
+    } finally {
+        setLoading(elements.loadIdListBtn, false);
+    }
+}
+
+// 渲染 ID 列表
+function renderIdList(results, totalCount) {
+    if (results.length === 0) {
+        elements.manageStats.textContent = '暂无数据';
+        elements.idListResults.innerHTML = '<div class="empty-state">📭 还没有图片，去添加一些吧！</div>';
+        return;
+    }
+    
+    const currentPage = state.idListPage;
+    const pageSize = state.idListPageSize;
+    const start = (currentPage - 1) * pageSize + 1;
+    const end = Math.min(currentPage * pageSize, totalCount);
+    
+    elements.manageStats.textContent = `共 ${totalCount} 个素材，当前显示第 ${start}-${end} 个`;
+    elements.idListResults.innerHTML = '';
+    
+    results.forEach(item => {
+        createIdListCard(item);
+    });
+}
+
+// 创建 ID 列表卡片（复用搜索结果卡片逻辑）
+function createIdListCard(item) {
+    const { id, document: docContent, metadata } = item;
+    const card = document.createElement('div');
+    card.className = 'result-card';
+    
+    const fileNames = metadata.file_names || [];
+    const creationTime = formatTimestamp(metadata['creation time']);
+    const modificationTime = formatTimestamp(metadata['modification time']);
+    
+    // 构建图片区域 HTML（复用搜索结果的图片显示逻辑）
+    let imagesHtml = '';
+    if (fileNames.length > 0) {
+        if (fileNames.length === 1) {
+            const imageUrl = `/uploads/${id}/${fileNames[0]}`;
+            imagesHtml = `
+                <div class="result-image-container single">
+                    <img src="${imageUrl}" class="result-image" alt="${fileNames[0]}" 
+                         onerror="this.parentElement.innerHTML='<div class=\\'result-image-placeholder\\' style=\\'height: 200px; display: flex; align-items: center; justify-content: center; background: #e2e8f0;\\'>📷 加载失败</div>'">
+                </div>
+            `;
+        } else {
+            imagesHtml = '<div class="result-images-grid">';
+            fileNames.slice(0, 4).forEach((fileName, idx) => {
+                const imageUrl = `/uploads/${id}/${fileName}`;
+                imagesHtml += `
+                    <div class="result-image-wrapper" onclick="event.stopPropagation(); showImageDetail('${id}', '${fileName}')">
+                        <img src="${imageUrl}" alt="${fileName}" loading="lazy" 
+                             onerror="this.parentElement.innerHTML='<div class=\\'image-error\\'>📷</div>'">
+                    </div>
+                `;
+            });
+            if (fileNames.length > 4) {
+                imagesHtml += `<div class="result-image-more">+${fileNames.length - 4}</div>`;
+            }
+            imagesHtml += '</div>';
+        }
+    } else {
+        imagesHtml = `
+            <div class="result-image-placeholder" style="height: 200px; background: #e2e8f0; display: flex; align-items: center; justify-content: center;">
+                <span>📷 暂无图片</span>
+            </div>
+        `;
+    }
+    
+    // 截取文档内容预览
+    const docPreview = docContent ? docContent.substring(0, 150) + (docContent.length > 150 ? '...' : '') : '无描述信息';
+    
+    card.innerHTML = `
+        ${imagesHtml}
+        <div class="result-info">
+            <div class="result-id">📁 ID: ${id}</div>
+            <div class="result-times">
+                <span>创建：${creationTime}</span>
+                <span>修改：${modificationTime}</span>
+            </div>
+            ${fileNames.length > 1 ? `<div class="result-files-count">${fileNames.length} 个文件</div>` : ''}
+            <div class="result-doc-preview">${escapeHtml(docPreview)}</div>
+            <div class="result-actions">
+                <button class="btn-view" onclick="event.stopPropagation(); showImageDetail('${id}')">查看详情</button>
+                <button class="btn-optimize" onclick="event.stopPropagation(); openSecondChance('${id}')">二次优化</button>
+                <button class="btn-delete" onclick="event.stopPropagation(); deleteIdListItem('${id}', this)">删除</button>
+            </div>
+        </div>
+    `;
+    
+    card.addEventListener('click', () => {
+        const firstFile = fileNames.length > 0 ? fileNames[0] : null;
+        showImageDetail(id, firstFile);
+    });
+    
+    elements.idListResults.appendChild(card);
+}
+
+// 处理分页
+function handlePageChange(delta) {
+    const newPage = state.idListPage + delta;
+    
+    // 计算总页数
+    const totalPages = Math.ceil(state.idListTotal / state.idListPageSize) || 1;
+    
+    // 边界检查
+    if (newPage < 1 || newPage > totalPages) {
+        showToast('已经是第一页或最后一页了', 'info');
+        return;
+    }
+    
+    state.idListPage = newPage;
+    elements.currentPageInput.value = newPage;
+    handleIdListLoad();
+}
+
+// 处理页码输入
+function handlePageInput() {
+    const newPage = parseInt(elements.currentPageInput.value);
+    
+    // 计算总页数
+    const totalPages = Math.ceil(state.idListTotal / state.idListPageSize) || 1;
+    
+    // 验证输入
+    if (isNaN(newPage) || newPage < 1) {
+        showToast('页码必须大于 0', 'warning');
+        elements.currentPageInput.value = state.idListPage;
+        return;
+    }
+    
+    if (newPage > totalPages) {
+        showToast(`最大页码为 ${totalPages}`, 'warning');
+        elements.currentPageInput.value = state.idListPage;
+        return;
+    }
+    
+    state.idListPage = newPage;
+    handleIdListLoad();
+}
+
+// 更新分页控件状态
+function updatePageControls(totalCount) {
+    const totalPages = Math.ceil(totalCount / state.idListPageSize) || 1;
+    elements.totalPages.textContent = totalPages;
+    
+    // 更新 input 的 max 属性
+    if (elements.currentPageInput) {
+        elements.currentPageInput.max = totalPages;
+    }
+    
+    elements.prevPageBtn.disabled = state.idListPage <= 1;
+    elements.nextPageBtn.disabled = state.idListPage >= totalPages;
+}
+
+// 删除图片列表项
+async function deleteIdListItem(id, btn) {
+    if (!confirm(`确定要删除素材 "${id}" 吗？此操作不可恢复！`)) {
+        return;
+    }
+    
+    const originalText = btn.textContent;
+    btn.textContent = '删除中...';
+    btn.disabled = true;
+    
+    try {
+        const response = await fetch(`/delete?id=${encodeURIComponent(id)}`);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.detail || '删除失败');
+        }
+        
+        // 从缓存中移除
+        delete state.idListCache[id];
+        
+        // 移除卡片
+        const card = btn.closest('.result-card');
+        card.style.transition = 'all 0.3s';
+        card.style.opacity = '0';
+        card.style.transform = 'scale(0.9)';
+        setTimeout(() => card.remove(), 300);
+        
+        showToast(`素材 "${id}" 已删除`, 'success');
+        
+        // 更新统计（可选：重新加载列表或减少计数）
+        state.idListTotal--;
+        elements.manageStats.textContent = `共 ${state.idListTotal} 个素材（已刷新计数）`;
+        
+    } catch (error) {
+        showToast(error.message, 'error');
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
+}
+
+// 在 switchTab 中添加
+function switchTab(tabName) {
+    state.currentTab = tabName;
+    
+    elements.tabBtns.forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tabName);
+    });
+    
+    elements.tabContents.forEach(content => {
+        content.classList.toggle('active', content.id === `${tabName}-tab`);
+    });
+    
+    // 新增：切换到图片管理标签时自动加载列表
+    if (tabName === 'manage' && elements.idListResults.innerHTML.includes('点击') || 
+        elements.idListResults.innerHTML.includes('加载中')) {
+        handleIdListLoad();
+    }
+}
+
 
 // 启动应用
 init();

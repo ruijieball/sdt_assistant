@@ -1257,3 +1257,119 @@ body {
     background: #e9d5ff;
     border-color: #c4b5fd;
 }
+
+/* 素材管理页面控制区域 */
+.manage-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.page-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.page-btn {
+    padding: 0.5rem 1rem;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.page-btn:hover:not(:disabled) {
+    background: var(--primary-hover);
+}
+
+.page-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.page-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+#current-page-input {
+    width: 60px;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    text-align: center;
+}
+
+.manage-stats {
+    padding: 1rem;
+    background: #f8fafc;
+    border-radius: 0.5rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.9rem;
+    color: #475569;
+}
+
+/* 结果卡片 ID 显示 */
+.result-id {
+    font-weight: 600;
+    color: var(--primary-color);
+    margin-bottom: 0.5rem;
+    font-size: 0.95rem;
+}
+
+/* 结果卡片时间显示 */
+.result-times {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+}
+
+/* 文档预览 */
+.result-doc-preview {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+    max-height: 60px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    line-clamp: 3;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+}
+
+/* 多图片网格更多提示 */
+.result-image-more {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.6);
+    color: white;
+    font-weight: 600;
+    font-size: 1.2rem;
+    min-height: 96px;
+    border-radius: 4px;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+    .manage-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .page-controls {
+        justify-content: center;
+    }
+}

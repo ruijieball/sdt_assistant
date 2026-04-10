@@ -34,10 +34,38 @@
                 <span class="icon">🚮</span>
                 <span>图片查重</span>
             </button>
+            <!-- 素材管理 -->
+            <button class="tab-btn" data-tab="manage">
+                <span class="icon">📋</span>
+                <span>素材管理</span>
+            </button>
         </nav>
 
         <!-- 内容区域 -->
         <main class="content">
+
+            <!-- 素材管理模块 -->
+            <section id="manage-tab" class="tab-content">
+                <div class="manage-controls">
+                    <button class="search-btn" id="load-id-list-btn">
+                        <span class="icon">🔄</span>
+                        <span class="btn-text">刷新列表</span>
+                        <span class="loading-spinner hidden"></span>
+                    </button>
+                    <div class="page-controls">
+                        <button class="page-btn" id="prev-page-btn" disabled>上一页</button>
+                        <span class="page-info">
+                            第 <input type="number" id="current-page-input" min="1" max="1" value="1"> 页
+                            / 共 <span id="total-pages">1</span> 页
+                        </span>
+                        <button class="page-btn" id="next-page-btn" disabled>下一页</button>
+                    </div>
+                </div>
+
+                <div class="manage-stats" id="manage-stats"></div>
+
+                <div class="search-results" id="id-list-results"></div>
+            </section>
             <!-- 添加图片模块 -->
             <section id="add-tab" class="tab-content active">
                 <div class="upload-area" id="upload-area">

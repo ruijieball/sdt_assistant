@@ -1,3 +1,11 @@
+## 0.1.3 (2026.4.11)
+
+### New Features
+
+- **View Images**: Added new page to view all uploaded images in one place
+
+---
+
 ## 0.1.2 (2026.4.9)
 
 ### New Features
