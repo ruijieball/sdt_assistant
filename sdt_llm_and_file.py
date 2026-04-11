@@ -38,7 +38,7 @@ def detect_image_type(content) -> str:
     header = content[:64]  # 读取前64字节以支持更复杂的检测
     
     if len(header) < 4:
-        return "unknow"
+        return "unknown"
     
     # PNG: 89 50 4E 47 0D 0A 1A 0A
     elif header[:8] == b'\x89PNG\r\n\x1a\n':
@@ -84,7 +84,7 @@ def detect_image_type(content) -> str:
             # 大模型暂不支持此格式
             return "image/avif"
     
-    return "unknow"
+    return "unknown"
 
 
 def image_resolution_ok(content, file_name) -> bool:
@@ -213,11 +213,17 @@ def read_yaml(id: str, document: str, former_metadata) -> dict:
         add_metadata["tags"] = yaml_result["tags"]
         add_metadata["file_names"] = former_metadata["file_names"]
         time_stamp = time.time()
-        add_metadata["modification time"] = time_stamp
-        if "creation time" not in former_metadata:
-            add_metadata["creation time"] = time_stamp
+        add_metadata["modification_time"] = time_stamp
+        if "creation_time" not in former_metadata:
+            add_metadata["creation_time"] = time_stamp
         else:
-            add_metadata["creation time"] = former_metadata["creation time"]
+            add_metadata["creation_time"] = former_metadata["creation_time"]
+        if "nsfw" in yaml_result["tags"] or "NSFW" in yaml_result["tags"] or "维系" in yaml_result["tags"]:
+            add_metadata["sensitive"] = True
+        else:
+            add_metadata["sensitive"] = False
+        if former_metadata.get("source") != "" and former_metadata.get("source") != None:
+            add_metadata["source"] = former_metadata["source"]
     except (TypeError, KeyError) as e:
         logger.error(f"yaml读取错误")
         logger.debug(f"llm_result内容:{document}")
@@ -301,47 +307,58 @@ async def llm_create_yaml_and_save(user_files) -> dict:
     folder_name = str(uuid.uuid7().hex)
     os.makedirs(os.path.join(UPLOAD_FOLDER, folder_name))
     
-    for file in user_files:
+    try: 
+        for file in user_files:
 
-        content = await file.read()
-        file_name = file.filename
+            content = await file.read()
+            file_name = file.filename
 
-        image_url :str = make_image_url(content, file_name)
+            image_url :str = make_image_url(content, file_name)
 
-        if image_url == "":
+            if image_url == "":
+                return result
+
+            llm_messages.append({
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": image_url}
+                    }
+                ]
+            })
+
+            file_extension = detect_image_type(content).split('/')[1]
+            file_name = str(uuid.uuid7().hex) + '.' + file_extension
+            file_name_list.append(file_name)
+            full_file_path = os.path.join(UPLOAD_FOLDER, folder_name, file_name)
+
+            async with aiofiles.open(full_file_path, "wb") as f:
+                await f.write(content)
+
+            await add_dedup_entry(folder_name + '/' + file_name, await encode_dedup_image(full_file_path))
+
+            logger.info(f"存储素材：{folder_name}/{file_name}")
+
+        llm_result :str = await ask_llm(llm_messages)
+
+        if llm_result == "":
             return result
-
-        llm_messages.append({
-            "role": "user",
-            "content": [
-                {
-                    "type": "image_url",
-                    "image_url": {"url": image_url}
-                }
-            ]
-        })
-
-        file_extension = detect_image_type(content).split('/')[1]
-        file_name = str(uuid.uuid7().hex) + '.' + file_extension
-        file_name_list.append(file_name)
-        full_file_path = os.path.join(UPLOAD_FOLDER, folder_name, file_name)
-
-        async with aiofiles.open(full_file_path, "wb") as f:
-            await f.write(content)
-
-        await add_dedup_entry(folder_name + '/' + file_name, await encode_dedup_image(full_file_path))
-
-        logger.info(f"存储素材：{folder_name}/{file_name}")
-
-    llm_result :str = await ask_llm(llm_messages)
-
-    if llm_result == "":
+        
+        add_metadata["file_names"] = file_name_list
+        result = read_yaml(folder_name, llm_result, add_metadata)
+        
         return result
-    
-    add_metadata["file_names"] = file_name_list
-    result = read_yaml(folder_name, llm_result, add_metadata)
-    
-    return result
+    except Exception as e:
+        logger.info("大模型返回结果错误，清理已创建的文件夹")
+        # 失败时清理已创建的文件夹
+        await delete_id_folder(folder_name)
+        return result
+    # 如果 result 为空，也需要清理文件夹
+    finally:
+        logger.info("大模型返回结果错误，清理已创建的文件夹")
+        if result["add_id"] == "" and os.path.isdir(os.path.join(UPLOAD_FOLDER, folder_name)):
+            await delete_id_folder(folder_name)
 
 
 async def delete_id_folder(id: str):

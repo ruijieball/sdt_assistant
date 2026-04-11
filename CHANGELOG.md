@@ -1,3 +1,23 @@
+## 0.1.4 (2026.4.11)
+
+### New Features
+
+- **Safe Search**: Added safe search functionality to filter out sensitive content in search results. A toggle switch is available on the search page.
+- **Metadata Update API**: Introduced a new `/update-metadata` endpoint to allow updating specific metadata fields (`creation_time`, `modification_time`, `sensitive`, `tags`, `file_names`, `source`) for any given ID.
+
+### Improvements
+
+- **Metadata Standardization**: Standardized metadata keys from `creation time`/`modification time` to `creation_time`/`modification_time` for consistency.
+- **Automatic Sensitive Tagging**: Automatically sets the `sensitive` metadata flag to `true` if AI-generated tags contain "nsfw", "NSFW", or "维系".
+- **Robust Error Handling**: Enhanced error handling in the LLM processing pipeline to clean up orphaned upload folders on failure or empty results.
+- **Null Safety**: Added null checks in the `/search` endpoint to prevent crashes when ChromaDB returns empty results.
+- **Frontend Enhancements**: 
+  - Display sensitive content indicators (🔞) across search results, detail modals, deduplication lists, and the image browser.
+  - Show the `source` metadata field where applicable in the UI.
+- **Bug Fixes**: Corrected a typo from "unknow" to "unknown" in image type detection.
+
+---
+
 ## 0.1.3 (2026.4.11)
 
 ### New Features

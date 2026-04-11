@@ -25,6 +25,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from typing import Annotated
+from enum import Enum
 import uvicorn
 from sdt_llm_and_file import llm_create_yaml_and_save, llm_create_yaml_without_save, get_uploads_list, delete_id_folder, read_yaml
 import sdt_chroma
@@ -97,6 +98,7 @@ class PruneResponse(BaseModel):
 
 class AddResponse(BaseModel):
     result: str = Field(description="操作结果状态")
+    add_id: str = Field(description="添加的id")
     add_document: str = Field(description="添加的文档内容")
     process_time: float = Field(description="处理耗时（秒）")
 
@@ -122,40 +124,19 @@ class GetIdListResponse(BaseModel):
     process_time: float = Field(description="处理耗时（秒）")
 
 
+class MetadataEnum(str, Enum):
+    CREATION_TIME = "creation_time"
+    MODIFICATION_TIME = "modification_time"
+    SENSITIVE = "sensitive"
+    TAGS = "tags"
+    FILE_NAMES = "file_names"
+    SOURCE = "source"
+
+
 async def validate_add_params(
     # user_content: Annotated[str, Form()] | None = None,
     user_files: list[UploadFile] | None = None
 ):
-    '''
-    # 检查是否上传参数为空
-    if user_files == None and user_content == None:
-        raise HTTPException(status_code = 400, detail = "请上传要识别的内容")
-    
-    # 检查usercontent长度
-    if user_content != None and len(user_content) > 500:
-        raise HTTPException(status_code = 413, detail = "输入信息过长，请精简需求")
-    '''
-
-    '''
-    # 检查last_content是否合法
-    # last_content和user_files互斥，即上传过图片素材后，不可修改要上传的素材
-    from pydantic import TypeAdapter, ValidationError
-    from openai.types.chat import ChatCompletionMessageParam
-    last_content_validator = TypeAdapter(list[ChatCompletionMessageParam])
-    if last_content != None:
-        try:
-            last_content_json = json.loads(last_content)
-            last_content_result = last_content_validator.validate_python(last_content_json)
-        except json.JSONDecodeError:
-            raise HTTPException(status_code = 400, detail="last_content: 非法json")
-        except ValidationError:
-            raise HTTPException(status_code = 400, detail="last_content: 数据校验失败")
-        # 若last_content已有内容，则丢弃user_files中的内容
-        user_files_result = None
-    else:
-        last_content_result = None
-        user_files_result = user_files
-    '''
     
     if user_files == None:
         # 检查是否上传素材
@@ -213,19 +194,50 @@ async def llm_chat(params: Annotated[tuple, Depends(validate_add_params)]):
     logger.info(f"/add/请求处理完成, process_time={process_time}")
 
     return {"result": "success", 
+            "add_id": result["add_id"],
             "add_document": result["add_document"], 
             "process_time": process_time
             }
 
 
 @app.get("/search", summary = "通过关键词搜索id", tags = ["Search"], response_model = SearchResponse)
-def chroma_query(text: str = Query(description = "搜索关键词")):
+def chroma_query(text: str = Query(description = "搜索关键词"), safe_search: bool = Query(default = True, description = "是否开启安全搜索，开启后会过滤掉metadata中包含'sensitive': True的条目")):
 
     start_time = time.time()
 
-    logger.info("收到请求/search?text={text}")
+    logger.info(f"收到请求/search?text={text}")
 
     result = sdt_chroma.text_query(text)
+
+    # 添加空值检查，防止 chromadb 返回 None
+    if result["ids"] is None or result["documents"] is None or result["distances"] is None or result["metadatas"] is None:
+        end_time = time.time()
+        process_time = end_time - start_time
+        logger.info(f"/search请求处理完成，无结果，process_time={process_time}")
+        return {
+            "ids": [[]],
+            "documents": [[]],
+            "distances": [[]],
+            "metadatas": [[]],
+            "process_time": process_time
+        }
+
+    # 如果开启安全搜索，过滤掉metadata中包含'sensitive': True的条目
+    if safe_search:
+        filtered_ids = []
+        filtered_documents = []
+        filtered_distances = []
+        filtered_metadatas = []
+        for id, document, distance, metadata in zip(result["ids"][0], result["documents"][0], result["distances"][0], result["metadatas"][0]):
+            if metadata.get("sensitive") != True:
+                filtered_ids.append(id)
+                filtered_documents.append(document)
+                filtered_distances.append(distance)
+                filtered_metadatas.append(metadata)
+        result["ids"] = [filtered_ids]
+        result["documents"] = [filtered_documents]
+        result["distances"] = [filtered_distances]
+        result["metadatas"] = [filtered_metadatas]
 
     end_time = time.time()
     process_time = end_time - start_time
@@ -266,8 +278,9 @@ async def second_chance(para: SecondChanceParameters):
 
     end_time = time.time()
     process_time = end_time - start_time
-    logger.info(f"/status请求处理完成")
+    logger.info("/second-chance请求处理完成")
     return {"result": "success", 
+            "add_id": result["add_id"],
             "add_document": result["add_document"], 
             "process_time": process_time
             }
@@ -403,6 +416,65 @@ def update_document(para: UpdateParameters):
         }
 
 
+@app.post("/update-metadata", tags = ["Add"], response_model = CommonResponse)
+async def update_metadata(id: str = Query(description = "需要查询的id"), metadata_name: MetadataEnum = Query(description = "需要更新的metadata字段名称"), metadata_value: str = Query(description = "需要更新的metadata字段值")):
+    start_time = time.time()
+    logger.info(f"收到请求/update-metadata?id={id}&metadata_name={metadata_name}&metadata_value={metadata_value}")
+
+    former_metadata = sdt_chroma.query_metadata_by_id(id)
+    if former_metadata == {}:
+        raise HTTPException(status_code = 400, detail = "id错误请检查") 
+
+    # 根据metadata_name的不同，对metadata_value进行不同的转换和验证
+    converted_value = metadata_value
+    
+    if metadata_name in [MetadataEnum.CREATION_TIME, MetadataEnum.MODIFICATION_TIME]:
+        try:
+            converted_value = float(metadata_value)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"{metadata_name} 必须是有效的数字")
+            
+    elif metadata_name == MetadataEnum.SENSITIVE:
+        # Convert string to boolean (handle common boolean string representations)
+        if metadata_value.lower() in ['true', 'True', '1', 'yes', 'on']:
+            converted_value = True
+        elif metadata_value.lower() in ['false', '0', 'no', 'off']:
+            converted_value = False
+        else:
+            raise HTTPException(status_code=400, detail="sensitive 必须是布尔值 (true/false, 1/0, yes/no, on/off)")
+            
+    elif metadata_name in [MetadataEnum.FILE_NAMES, MetadataEnum.TAGS]:
+        # Expect JSON array format for lists
+        import json
+        try:
+            parsed_value = json.loads(metadata_value)
+            if not isinstance(parsed_value, list):
+                raise ValueError("Not a list")
+            # Ensure all items are strings
+            converted_value = [str(item) for item in parsed_value]
+        except (json.JSONDecodeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"{metadata_name} 必须是JSON格式的字符串数组，例如: [\"item1\", \"item2\"]")
+            
+    elif metadata_name == MetadataEnum.SOURCE:
+        # Already a string, no conversion needed
+        converted_value = str(metadata_value)
+        
+    add_metadata = former_metadata
+    add_metadata["modification_time"] = start_time
+    # 即使metadata_name为modification_time，也能被覆盖
+    add_metadata[metadata_name] = converted_value
+
+    sdt_chroma.update_metadata(id, add_metadata)
+
+    end_time = time.time()
+    process_time = end_time - start_time
+    logger.info("/update-metadata请求处理完成")
+    return {
+        "result": "OK",
+        "process_time": process_time
+        }
+
+
 @app.get("/query-id", summary = "通过id返回素材详情", tags = ["Search"], response_model = QueryResponse)
 def query_id(id: str = Query(description = "需要查询的id")):
     start_time = time.time()
@@ -424,7 +496,7 @@ def query_id(id: str = Query(description = "需要查询的id")):
 @app.get("/check-duplication", summary = "检查重复素材", tags = ["System"], response_model = CommonResponse)
 async def check_duplication():
     start_time = time.time()
-    logger.info(f"收到请求/check-duplication")
+    logger.info("收到请求/check-duplication")
     result :dict = await sdt_check_duplication.find_duplicate_images()
     end_time = time.time()
     process_time = end_time - start_time
@@ -438,7 +510,7 @@ async def check_duplication():
 @app.post("/encode-dedup", summary = "编码缺失的图片dedup信息用于加速图片去重", tags = ["System"], response_model = CommonResponse)
 async def encode_dedup(para: EncodeDedupParameters):
     start_time = time.time()
-    logger.info(f"收到请求/encode-dedup")
+    logger.info("收到请求/encode-dedup")
     missing_dedup_images = para.missing_dedup_images
     seccess_dedup_count = 0
     fail_dedup_count = 0
@@ -473,7 +545,7 @@ async def get_status():
 
     end_time = time.time()
     process_time = end_time - start_time
-    logger.info(f"/status请求处理完成")
+    logger.info("/status请求处理完成")
     return {
         "result": "OK",
         "process_time": process_time

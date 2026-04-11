@@ -327,6 +327,69 @@ body {
     margin-bottom: 10px;
 }
 
+/* Safe Search Toggle */
+.safe-search-toggle {
+    margin: 15px 0 20px 0;
+    display: flex;
+    align-items: center;
+}
+
+.toggle-container {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+}
+
+.toggle-slider {
+    position: relative;
+    width: 48px;
+    height: 24px;
+    background: #e2e8f0;
+    border-radius: 24px;
+    transition: background-color 0.3s;
+    margin-right: 12px;
+}
+
+.toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: white;
+    top: 2px;
+    left: 2px;
+    transition: transform 0.3s;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.toggle-container input:checked + .toggle-slider {
+    background: var(--primary-color);
+}
+
+.toggle-container input:checked + .toggle-slider::before {
+    transform: translateX(24px);
+}
+
+.toggle-container input {
+    display: none;
+}
+
+.toggle-label {
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+/* Responsive adjustment for toggle */
+@media (max-width: 768px) {
+    .safe-search-toggle {
+        justify-content: center;
+        margin: 15px 0;
+    }
+}
+
 /* ========== 搜索结果多图片支持 ========== */
 
 /* 单张图片容器 */
@@ -1372,4 +1435,35 @@ body {
     .page-controls {
         justify-content: center;
     }
+}
+
+/* Sensitive content indicator */
+.sensitive-indicator {
+    background: var(--error-color);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.result-sensitive {
+    font-size: 0.8rem;
+    color: var(--error-color);
+    font-weight: 600;
+    margin: 4px 0;
+}
+
+.result-source {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin: 4px 0;
+    font-style: italic;
+}
+
+/* Deduplication group sensitive indicator */
+.dedup-group-id .sensitive-indicator {
+    font-size: 0.7rem;
+    padding: 1px 6px;
+    margin-left: 8px;
 }

@@ -14,7 +14,8 @@ const state = {
     idListPage: 1,
     idListPageSize: 20,
     idListTotal: 0,
-    idListCache: {}  // id -> {document, metadata} 缓存
+    idListCache: {},  // id -> {document, metadata} 缓存
+    safeSearch: true
 };
 
 // DOM 元素
@@ -35,6 +36,7 @@ const elements = {
     searchBtn: document.getElementById('search-btn'),
     searchStats: document.getElementById('search-stats'),
     searchResults: document.getElementById('search-results'),
+    safeSearchCheckbox: document.getElementById('safe-search-checkbox'),
     
     // 二次优化模块
     scIdInput: document.getElementById('sc-id-input'),
@@ -95,6 +97,10 @@ function bindEvents() {
     elements.searchInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') handleSearch();
     });
+    // Safe search toggle
+    if (elements.safeSearchCheckbox) {
+        elements.safeSearchCheckbox.addEventListener('change', handleSafeSearchToggle);
+    }
     
     // 二次优化
     elements.scBtn.addEventListener('click', handleSecondChance);
@@ -327,6 +333,57 @@ function renderSearchResults(data) {
     });
 }
 
+// Handle safe search toggle
+function handleSafeSearchToggle() {
+    state.safeSearch = elements.safeSearchCheckbox.checked;
+}
+
+// Modify handleSearch function to include safe_search parameter
+async function handleSearch() {
+    const query = elements.searchInput.value.trim();
+    if (!query) {
+        showToast('请输入搜索关键词', 'info');
+        return;
+    }
+    
+    setLoading(elements.searchBtn, true);
+    elements.searchResults.innerHTML = '<div class="empty-state">搜索中...</div>';
+    elements.searchStats.textContent = '';
+    
+    try {
+        const safeSearchParam = state.safeSearch ? 'true' : 'false';
+        const response = await fetch(`/search?text=${encodeURIComponent(query)}&safe_search=${safeSearchParam}`);
+        const data = await response.json();
+        
+        if (response.ok) {
+            renderSearchResults(data);
+        } else {
+            throw new Error(data.detail || '搜索失败');
+        }
+    } catch (error) {
+        elements.searchResults.innerHTML = `<div class="empty-state error">搜索失败：${error.message}</div>`;
+        showToast(error.message, 'error');
+    } finally {
+        setLoading(elements.searchBtn, false);
+    }
+}
+
+// Add this helper function to format sensitive status
+function formatSensitiveStatus(sensitive) {
+    if (sensitive === true) {
+        return '<span class="sensitive-indicator">🔞 敏感内容</span>';
+    }
+    return '';
+}
+
+// Add this helper function to format source
+function formatSource(source) {
+    if (source && source.trim()) {
+        return `<p><strong>来源:</strong> ${escapeHtml(source)}</p>`;
+    }
+    return '';
+}
+
 // 创建结果卡片
 function createResultCard(id, score, metadata) {
     console.log('createResultCard - id:', id, 'metadata:', metadata, 'file_names:', metadata.file_names);
@@ -377,6 +434,7 @@ function createResultCard(id, score, metadata) {
         ${imagesHtml}
         <div class="result-info">
             <div class="result-score">匹配度：${score}%</div>
+            ${metadata['sensitive'] === true ? '<div class="result-sensitive">🔞 敏感</div>' : ''}
             ${fileNames.length > 1 ? `<div class="result-files-count">${fileNames.length} 个文件</div>` : ''}
             <div class="result-actions">
                 <button class="btn-view" onclick="event.stopPropagation(); showImageDetail('${folderId}')">查看详情</button>
@@ -477,14 +535,18 @@ function showImageDetail(id, specificFileName = null) {
         });
     }
     
-    const creationTime = formatTimestamp(metadata['creation time']);
-    const modificationTime = formatTimestamp(metadata['modification time']);
+    const creationTime = formatTimestamp(metadata['creation_time']);
+    const modificationTime = formatTimestamp(metadata['modification_time']);
+    const sensitiveStatus = formatSensitiveStatus(metadata['sensitive']);
+    const sourceInfo = formatSource(metadata['source']);
     
     elements.modalInfo.innerHTML = `
         <h3>图片信息</h3>
         <p><strong>ID:</strong> ${id}</p>
         <p><strong>创建时间:</strong> ${creationTime}</p>
         <p><strong>修改时间:</strong> ${modificationTime}</p>
+        ${sensitiveStatus ? `<p>${sensitiveStatus}</p>` : ''}
+        ${sourceInfo}
         ${files.length > 1 ? `<p><strong>当前文件:</strong> ${displayFile || '无'}</p>` : ''}
         ${filesHtml}
         <div class="document-content"><pre>${escapeHtml(doc || '无描述信息')}</pre></div>
@@ -780,9 +842,9 @@ function createDedupGroupElement(group) {
     card.dataset.groupId = group.id;
     
     const idInfo = state.dedupIdInfo[group.id];
-    const creationTime = idInfo ? formatTimestamp(idInfo.metadata?.['creation time']) : '未知';
-    const modificationTime = idInfo ? formatTimestamp(idInfo.metadata?.['modification time']) : '未知';
-    const docContent = idInfo ? idInfo.document : '';  // ✅ 修改变量名：document -> docContent
+    const creationTime = idInfo ? formatTimestamp(idInfo.metadata?.['creation_time']) : '未知';
+    const modificationTime = idInfo ? formatTimestamp(idInfo.metadata?.['modification_time']) : '未知';
+    const docContent = idInfo ? idInfo.document : '';
     
     // 构建图片列表 HTML
     let imagesHtml = '';
@@ -841,11 +903,14 @@ function createDedupGroupElement(group) {
         `;
     });
     
+    const sensitiveStatus = idInfo?.metadata?.['sensitive'] === true ? '🔞 敏感内容' : '';
+    const sourceInfo = idInfo?.metadata?.['source'] ? ` | 来源: ${idInfo.metadata['source']}` : '';
+    
     card.innerHTML = `
         <div class="dedup-group-header">
             <div class="dedup-group-info">
-                <div class="dedup-group-id">📁 ID: ${group.id}</div>
-                <div class="dedup-group-times">创建：${creationTime} | 修改：${modificationTime}</div>
+                <div class="dedup-group-id">📁 ID: ${group.id} ${sensitiveStatus}</div>
+                <div class="dedup-group-times">创建：${creationTime} | 修改：${modificationTime}${sourceInfo}</div>
             </div>
             <div class="dedup-group-actions">
                 <button class="btn-view-doc" onclick="showDocumentModal('${group.id}', event)">
@@ -945,14 +1010,18 @@ function showDedupImageDetail(id, specificFileName = null) {
     }
     
     // 格式化时间戳
-    const creationTime = formatTimestamp(metadata['creation time']);
-    const modificationTime = formatTimestamp(metadata['modification time']);
+    const creationTime = formatTimestamp(metadata['creation_time']);
+    const modificationTime = formatTimestamp(metadata['modification_time']);
+    const sensitiveStatus = formatSensitiveStatus(metadata['sensitive']);
+    const sourceInfo = formatSource(metadata['source']);
     
     elements.modalInfo.innerHTML = `
         <h3>图片信息</h3>
         <p><strong>ID:</strong> ${id}</p>
         <p><strong>创建时间:</strong> ${creationTime}</p>
         <p><strong>修改时间:</strong> ${modificationTime}</p>
+        ${sensitiveStatus ? `<p>${sensitiveStatus}</p>` : ''}
+        ${sourceInfo}
         ${files.length > 1 ? `<p><strong>当前文件:</strong> ${displayFile || '无'}</p>` : ''}
         ${filesHtml}
         <div class="document-content"><pre>${escapeHtml(docContent || '无描述信息')}</pre></div>
@@ -1175,8 +1244,8 @@ function createIdListCard(item) {
     card.className = 'result-card';
     
     const fileNames = metadata.file_names || [];
-    const creationTime = formatTimestamp(metadata['creation time']);
-    const modificationTime = formatTimestamp(metadata['modification time']);
+    const creationTime = formatTimestamp(metadata['creation_time']);
+    const modificationTime = formatTimestamp(metadata['modification_time']);
     
     // 构建图片区域 HTML（复用搜索结果的图片显示逻辑）
     let imagesHtml = '';
@@ -1215,6 +1284,7 @@ function createIdListCard(item) {
     
     // 截取文档内容预览
     const docPreview = docContent ? docContent.substring(0, 150) + (docContent.length > 150 ? '...' : '') : '无描述信息';
+    const sourceInfo = metadata['source'] ? `<div class="result-source">来源: ${escapeHtml(metadata['source'])}</div>` : '';
     
     card.innerHTML = `
         ${imagesHtml}
@@ -1224,6 +1294,8 @@ function createIdListCard(item) {
                 <span>创建：${creationTime}</span>
                 <span>修改：${modificationTime}</span>
             </div>
+            ${metadata['sensitive'] === true ? '<div class="result-sensitive">🔞 敏感</div>' : ''}
+            ${sourceInfo}
             ${fileNames.length > 1 ? `<div class="result-files-count">${fileNames.length} 个文件</div>` : ''}
             <div class="result-doc-preview">${escapeHtml(docPreview)}</div>
             <div class="result-actions">

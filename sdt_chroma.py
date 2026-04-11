@@ -32,6 +32,14 @@ def upsert_documents(id :str, document :str, metadata):
 
     return
 
+
+def update_metadata(id: str, metadata):
+
+    collection_text.update(ids = [id], metadatas = [metadata])
+    logger.info(f"{id}的metadata更新成功")
+
+    return
+
 def text_query(text):
     query_result = collection_text.query(
         query_texts = [text],
