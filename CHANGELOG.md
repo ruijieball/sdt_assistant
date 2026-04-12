@@ -1,3 +1,11 @@
+## 0.1.5 (2026.4.12)
+
+### Improvements
+
+- **ChromaDB Rebuild Script**: Added a `run-rebuild-chromadb` target in the Makefile to facilitate rebuilding the ChromaDB vector database, useful after schema or metadata changes.
+
+---
+
 ## 0.1.4 (2026.4.11)
 
 ### New Features

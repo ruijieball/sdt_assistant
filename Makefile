@@ -92,3 +92,12 @@ clean: stop
 
 # 重启服务
 restart: stop build run
+
+# 重建chromadb数据库
+run-rebuild-chromadb: stop
+	docker run --rm -it \
+		-v $(PROJECT_ROOT)/data:/sdt_assistant/data \
+		-v /etc/localtime:/etc/localtime:ro \
+		-v /etc/timezone:/etc/timezone:ro \
+		$(IMAGE_NAME):$(VERSION) \
+		python3 rebuild_chromadb.py
