@@ -551,7 +551,6 @@ function showImageDetail(id, specificFileName = null) {
         ${filesHtml}
         <div class="document-content"><pre>${escapeHtml(doc || '无描述信息')}</pre></div>
         <div class="modal-actions">
-            <button class="btn-view-doc" onclick="showDocumentModal('${id}', event)">📄 查看文档</button>
             <button class="btn-optimize" onclick="closeModal(); openSecondChance('${id}')">🔄 二次优化</button>
         </div>
     `;
@@ -1026,7 +1025,6 @@ function showDedupImageDetail(id, specificFileName = null) {
         ${filesHtml}
         <div class="document-content"><pre>${escapeHtml(docContent || '无描述信息')}</pre></div>
         <div class="modal-actions">
-            <button class="btn-view-doc" onclick="showDocumentModal('${id}', event)">📄 查看文档</button>
             <button class="btn-optimize" onclick="closeModal(); openSecondChance('${id}')">🔄 二次优化</button>
         </div>
     `;

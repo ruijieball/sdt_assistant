@@ -1,3 +1,16 @@
+## 0.1.6 (2026.4.12)
+
+### Improvements
+
+- **Metadata Update API Enhancement**: Refactored the `/update-metadata` endpoint to use a Pydantic request model (`UpdateMetadataRequest`) instead of query parameters, improving type safety and validation.
+- **Robust Metadata Value Handling**: Enhanced parsing logic for metadata values in the `/update-metadata` endpoint:
+  - Added proper error handling for boolean conversion of the `sensitive` field.
+  - Changed list-type fields (`tags`, `file_names`) to expect native Python lists directly instead of JSON strings, simplifying the client-side payload.
+- **LLM Pipeline Stability**: Improved error logging and cleanup logic in the LLM document creation pipeline (`sdt_llm_and_file.py`) to ensure temporary folders are removed even if the result is empty or an exception occurs.
+- **Frontend Simplification**: Removed the "📄 查看文档" (View Document) button from image detail modals in both the main search and deduplication views, streamlining the user interface.
+
+---
+
 ## 0.1.5 (2026.4.12)
 
 ### Improvements

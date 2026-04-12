@@ -349,15 +349,18 @@ async def llm_create_yaml_and_save(user_files) -> dict:
         result = read_yaml(folder_name, llm_result, add_metadata)
         
         return result
+    
     except Exception as e:
         logger.info("大模型返回结果错误，清理已创建的文件夹")
+        logger.debug(e)
         # 失败时清理已创建的文件夹
         await delete_id_folder(folder_name)
         return result
-    # 如果 result 为空，也需要清理文件夹
+
     finally:
-        logger.info("大模型返回结果错误，清理已创建的文件夹")
+        # 如果 result 为空，也需要清理文件夹
         if result["add_id"] == "" and os.path.isdir(os.path.join(UPLOAD_FOLDER, folder_name)):
+            logger.info("大模型返回结果错误，清理已创建的文件夹")
             await delete_id_folder(folder_name)
 
 

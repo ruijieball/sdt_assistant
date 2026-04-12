@@ -65,6 +65,12 @@ class UpdateParameters(BaseModel):
         )
     
 
+class UpdateMetadataRequest(BaseModel):
+    id: str = Field(description = "需要查询的id")
+    metadata_name: MetadataEnum = Field(description = "需要更新的metadata字段名称")
+    metadata_value: float | list[str] | str = Field(description = "需要更新的metadata字段值（字符串形式，后端会转换）")
+    
+
 class SecondChanceParameters(BaseModel):
     id: str = Field(
         description = "需要更新的id"
@@ -417,8 +423,14 @@ def update_document(para: UpdateParameters):
 
 
 @app.post("/update-metadata", tags = ["Add"], response_model = CommonResponse)
-async def update_metadata(id: str = Query(description = "需要查询的id"), metadata_name: MetadataEnum = Query(description = "需要更新的metadata字段名称"), metadata_value: str = Query(description = "需要更新的metadata字段值")):
+async def update_metadata(para: UpdateMetadataRequest):
+    # 说明
+    # 对于tags的更新只会写入chromadb的metadata中，不会修改yaml中的tags字段
+    # 所以如果需要更新tags，最好在document中修改后调用/update接口进行更新，而不是调用/update-metadata接口单独更新metadata中的tags字段
     start_time = time.time()
+    id = para.id
+    metadata_name = para.metadata_name
+    metadata_value = para.metadata_value
     logger.info(f"收到请求/update-metadata?id={id}&metadata_name={metadata_name}&metadata_value={metadata_value}")
 
     former_metadata = sdt_chroma.query_metadata_by_id(id)
@@ -430,30 +442,31 @@ async def update_metadata(id: str = Query(description = "需要查询的id"), me
     
     if metadata_name in [MetadataEnum.CREATION_TIME, MetadataEnum.MODIFICATION_TIME]:
         try:
-            converted_value = float(metadata_value)
+            converted_value = float(metadata_value) # type: ignore
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"{metadata_name} 必须是有效的数字")
+            raise HTTPException(status_code = 400, detail = f"{metadata_name} 必须是有效的数字")
             
     elif metadata_name == MetadataEnum.SENSITIVE:
-        # Convert string to boolean (handle common boolean string representations)
-        if metadata_value.lower() in ['true', 'True', '1', 'yes', 'on']:
-            converted_value = True
-        elif metadata_value.lower() in ['false', '0', 'no', 'off']:
-            converted_value = False
-        else:
-            raise HTTPException(status_code=400, detail="sensitive 必须是布尔值 (true/false, 1/0, yes/no, on/off)")
+        try:
+            # Convert string to boolean (handle common boolean string representations)
+            if metadata_value.lower() in ['true', '1', 'yes', 'on']: # type: ignore
+                converted_value = True
+            elif metadata_value.lower() in ['false', '0', 'no', 'off']: # type: ignore
+                converted_value = False
+            else:
+                raise HTTPException(status_code = 400, detail = "sensitive 必须是布尔值 (true/false, 1/0, yes/no, on/off)")
+        except ValueError:
+            raise HTTPException(status_code = 400, detail = "sensitive 必须是布尔值 (true/false, 1/0, yes/no, on/off)")
             
     elif metadata_name in [MetadataEnum.FILE_NAMES, MetadataEnum.TAGS]:
-        # Expect JSON array format for lists
-        import json
         try:
-            parsed_value = json.loads(metadata_value)
+            parsed_value = list(metadata_value) # type: ignore
             if not isinstance(parsed_value, list):
                 raise ValueError("Not a list")
             # Ensure all items are strings
             converted_value = [str(item) for item in parsed_value]
-        except (json.JSONDecodeError, ValueError):
-            raise HTTPException(status_code=400, detail=f"{metadata_name} 必须是JSON格式的字符串数组，例如: [\"item1\", \"item2\"]")
+        except ValueError:
+            raise HTTPException(status_code = 400, detail = f"{metadata_name} 必须是列表")
             
     elif metadata_name == MetadataEnum.SOURCE:
         # Already a string, no conversion needed
