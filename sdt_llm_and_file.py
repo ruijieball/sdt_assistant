@@ -7,6 +7,7 @@ from openai import APIConnectionError, APITimeoutError, AuthenticationError,  AP
 from PIL import Image
 from config import LLM_API_URL, LLM_API_KEY, LLM_MODEL, LLM_SYSTEM_MESSAGE, IMG_MAX_BYTES_BASE64, IMG_MAX_HEIGHT, IMG_MAX_WIDTH, LLM_TIMEOUT, ACCEPTED_MIME_TYPE, UPLOAD_FOLDER
 from sdt_check_duplication import encode_dedup_image, add_dedup_entry
+import sdt_check_duplication
 import base64
 import io
 import os
@@ -353,7 +354,9 @@ async def llm_create_yaml_and_save(user_files) -> dict:
     except Exception as e:
         logger.info("大模型返回结果错误，清理已创建的文件夹")
         logger.debug(e)
-        # 失败时清理已创建的文件夹
+        # 失败时清理已创建的文件夹和dedup数据
+        to_delete = [folder_name + '/' + item for item in file_name_list]
+        await sdt_check_duplication.delete_dedup_entries(to_delete)
         await delete_id_folder(folder_name)
         return result
 
@@ -361,6 +364,8 @@ async def llm_create_yaml_and_save(user_files) -> dict:
         # 如果 result 为空，也需要清理文件夹
         if result["add_id"] == "" and os.path.isdir(os.path.join(UPLOAD_FOLDER, folder_name)):
             logger.info("大模型返回结果错误，清理已创建的文件夹")
+            to_delete = [folder_name + '/' + item for item in file_name_list]
+            await sdt_check_duplication.delete_dedup_entries(to_delete)
             await delete_id_folder(folder_name)
 
 

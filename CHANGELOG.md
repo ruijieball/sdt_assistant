@@ -1,3 +1,11 @@
+## 0.1.7（2026.4.18）
+
+### Bug Fixes
+
+- **LLM Pipeline Dedup Cleanup**: Fixed cleanup logic in the LLM document creation pipeline to also remove dedup entries when the model returns errors or empty results, preventing orphaned database records pointing to non-existent folders.
+
+---
+
 ## 0.1.6 (2026.4.12)
 
 ### Improvements
