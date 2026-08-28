@@ -767,6 +767,9 @@ function groupDedupById(rawResults) {
             }
         }
     }
+    for (const [path, image] of imageMap.entries()) {
+        image.related.sort((a, b) => a.score - b.score);
+    }
     
     // 第四步：按 id 分组
     for (const [path, image] of imageMap.entries()) {
@@ -781,8 +784,26 @@ function groupDedupById(rawResults) {
         
         groups.get(id).images.push(image);
     }
+
+    const groupsArray = Array.from(groups.values());
     
-    return Array.from(groups.values());
+    // 第五步：计算每个组的最低汉明距，并按此排序
+    groupsArray.forEach(group => {
+        let minScore = Infinity;
+        for (const image of group.images) {
+            for (const rel of image.related) {
+                if (rel.score < minScore) {
+                    minScore = rel.score;
+                }
+            }
+        }
+        group.minScore = minScore;
+    });
+    
+    // 按最低汉明距升序排序（值越小越相似，排前面）
+    groupsArray.sort((a, b) => a.minScore - b.minScore);
+
+    return groupsArray;
 }
 
 // 从路径提取 id (e.g., "id1/image.jpg" -> "id1")
